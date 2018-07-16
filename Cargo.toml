@@ -1,0 +1,7 @@
+[package]
+name = "roll2"
+version = "0.1.0"
+authors = ["Benjamin Hetherington <b.w.hetherington@gmail.com>"]
+
+[dependencies]
+rand = "*"
