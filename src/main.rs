@@ -87,8 +87,12 @@ impl Roll {
 /// form of either <number>d<die> or d<die>. In the latter case, the number of
 /// dice is inferred to be 1. If the argument cannot be parsed, `None` is
 /// returned instead.
-fn parse_arg(arg: &str) -> Option<Roll> {
-    let idx = arg.find('d')?;
+fn parse_arg(arg: &str) -> Result<Roll, &'static str> {
+    const ERR_NO_DIE: &'static str = "invalid roll format: no die specified";
+    const ERR_MOD_FMT: &'static str = "invalid roll format: modifier must be an integer";
+    const ERR_DIE_FMT: &'static str = "invalid roll format: die must be an integer";
+
+    let idx = arg.find('d').ok_or_else(|| ERR_NO_DIE)?;
     let (num, die) = arg.split_at(idx);
     let num: u32 = num.parse().unwrap_or_else(|_| 1);
     let die = die.trim_start_matches("d");
@@ -96,20 +100,20 @@ fn parse_arg(arg: &str) -> Option<Roll> {
     // Check if we have a flat bonus
     let (die, bonus) = if let Some(bonus_idx) = die.find('+') {
         let (die, bonus) = die.split_at(bonus_idx);
-        let bonus: i32 = bonus.parse().ok()?;
-        let die: u32 = die.parse().ok()?;
+        let bonus: i32 = bonus.parse().map_err(|_| ERR_MOD_FMT)?;
+        let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
         (die, bonus)
     } else if let Some(bonus_idx) = die.find('-') {
         let (die, bonus) = die.split_at(bonus_idx);
-        let bonus: i32 = bonus.parse().ok()?;
-        let die: u32 = die.parse().ok()?;
+        let bonus: i32 = bonus.parse().map_err(|_| ERR_MOD_FMT)?;
+        let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
         (die, bonus)
     } else {
-        let die: u32 = die.parse().ok()?;
+        let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
         (die, 0)
     };
 
-    Some(Roll {
+    Ok(Roll {
         num,
         die,
         bonus,
@@ -119,35 +123,35 @@ fn parse_arg(arg: &str) -> Option<Roll> {
 
 trait ParseArgs {
     /// Attempts to parse the arguments into an `impl Iterator<Item=Roll`.
-    fn parse_args(self) -> Option<Vec<Roll>>;
+    fn parse_args(self) -> Result<Vec<Roll>, &'static str>;
 }
 
 impl<T> ParseArgs for T
 where
     T: Iterator<Item = String>,
 {
-    fn parse_args(self) -> Option<Vec<Roll>> {
+    fn parse_args(self) -> Result<Vec<Roll>, &'static str> {
         self.flat_map(|arg| match arg.as_str() {
-            "adv" | "advantage" => vec![Some(Roll {
+            "adv" | "advantage" => vec![Ok(Roll {
                 num: 2,
                 die: 20,
                 bonus: 0,
                 exclude: Exclude::Low,
             })],
-            "dis" | "disadvantage" => vec![Some(Roll {
+            "dis" | "disadvantage" => vec![Ok(Roll {
                 num: 2,
                 die: 20,
                 bonus: 0,
                 exclude: Exclude::High,
             })],
             "chaos" | "chaos_bolt" => vec![
-                Some(Roll {
+                Ok(Roll {
                     num: 2,
                     die: 8,
                     bonus: 0,
                     exclude: Exclude::None,
                 }),
-                Some(Roll {
+                Ok(Roll {
                     num: 1,
                     die: 6,
                     bonus: 0,
@@ -155,37 +159,37 @@ where
                 }),
             ],
             "stats" | "char" | "character" => vec![
-                Some(Roll {
+                Ok(Roll {
                     num: 4,
                     die: 6,
                     bonus: 0,
                     exclude: Exclude::Low,
                 }),
-                Some(Roll {
+                Ok(Roll {
                     num: 4,
                     die: 6,
                     bonus: 0,
                     exclude: Exclude::Low,
                 }),
-                Some(Roll {
+                Ok(Roll {
                     num: 4,
                     die: 6,
                     bonus: 0,
                     exclude: Exclude::Low,
                 }),
-                Some(Roll {
+                Ok(Roll {
                     num: 4,
                     die: 6,
                     bonus: 0,
                     exclude: Exclude::Low,
                 }),
-                Some(Roll {
+                Ok(Roll {
                     num: 4,
                     die: 6,
                     bonus: 0,
                     exclude: Exclude::Low,
                 }),
-                Some(Roll {
+                Ok(Roll {
                     num: 4,
                     die: 6,
                     bonus: 0,
@@ -199,10 +203,11 @@ where
 }
 
 fn main() {
+    let name = env::args().next().unwrap();
     let rolls = env::args().skip(1).parse_args();
     match rolls {
-        Some(rolls) => match rolls.len() {
-            0 => println!("[Error] No dice specified"),
+        Ok(rolls) => match rolls.len() {
+            0 => println!("{}: no dice specified", name),
             _ => {
                 for roll in rolls {
                     let mut rng = thread_rng();
@@ -210,7 +215,7 @@ fn main() {
                 }
             }
         },
-        None => println!("[Error] Failed to parse input"),
+        Err(why) => println!("{}: {}", name, why),
     }
 }
 
