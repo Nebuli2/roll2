@@ -1,5 +1,3 @@
-extern crate rand;
-
 use rand::prelude::*;
 use std::env;
 
@@ -14,6 +12,7 @@ enum Exclude {
 struct Roll {
     num: u32,
     die: u32,
+    bonus: i32,
     exclude: Exclude,
 }
 
@@ -26,6 +25,9 @@ impl Roll {
     /// Simulates the `Roll`.
     fn roll(&self, mut rng: impl Rng) {
         print!("[{}d{}", self.num, self.die);
+        if self.bonus != 0 {
+            print!("{:+}", self.bonus);
+        }
         match self.exclude {
             Exclude::Low => print!(" - low"),
             Exclude::High => print!(" - high"),
@@ -34,7 +36,7 @@ impl Roll {
         print!("] ");
         match self.num {
             1 => {
-                let roll = rng.gen_range(1, self.die + 1);
+                let roll = rng.gen_range(1, self.die + 1) as i32 + self.bonus;
                 println!("{}", roll);
             }
             n if n > 1 => {
@@ -72,7 +74,8 @@ impl Roll {
                     }
                 }
 
-                let total: u32 = rolls.iter().sum();
+                let total = rolls.iter().sum::<u32>() as i32 + self.bonus;
+                let exclude = exclude as i32;
                 println!("final = {}", total - exclude);
             }
             _ => println!("no dice rolled"),
@@ -85,32 +88,33 @@ impl Roll {
 /// dice is inferred to be 1. If the argument cannot be parsed, `None` is
 /// returned instead.
 fn parse_arg(arg: &str) -> Option<Roll> {
-    if let Some(idx) = arg.find('d') {
-        let (num, die) = arg.split_at(idx);
-        let die = die.trim_left_matches("d");
+    let idx = arg.find('d')?;
+    let (num, die) = arg.split_at(idx);
+    let num: u32 = num.parse().unwrap_or_else(|_| 1);
+    let die = die.trim_start_matches("d");
 
-        if num.len() > 0 {
-            match (num.parse::<u32>(), die.parse::<u32>()) {
-                (Ok(num), Ok(die)) => Some(Roll {
-                    num,
-                    die,
-                    exclude: Exclude::None,
-                }),
-                _ => None,
-            }
-        } else {
-            let num = 1;
-            die.parse::<u32>()
-                .map(|die| Roll {
-                    num,
-                    die,
-                    exclude: Exclude::None,
-                })
-                .ok()
-        }
+    // Check if we have a flat bonus
+    let (die, bonus) = if let Some(bonus_idx) = die.find('+') {
+        let (die, bonus) = die.split_at(bonus_idx);
+        let bonus: i32 = bonus.parse().ok()?;
+        let die: u32 = die.parse().ok()?;
+        (die, bonus)
+    } else if let Some(bonus_idx) = die.find('-') {
+        let (die, bonus) = die.split_at(bonus_idx);
+        let bonus: i32 = bonus.parse().ok()?;
+        let die: u32 = die.parse().ok()?;
+        (die, bonus)
     } else {
-        None
-    }
+        let die: u32 = die.parse().ok()?;
+        (die, 0)
+    };
+
+    Some(Roll {
+        num,
+        die,
+        bonus,
+        exclude: Exclude::None,
+    })
 }
 
 trait ParseArgs {
@@ -127,22 +131,26 @@ where
             "adv" | "advantage" => vec![Some(Roll {
                 num: 2,
                 die: 20,
+                bonus: 0,
                 exclude: Exclude::Low,
             })],
             "dis" | "disadvantage" => vec![Some(Roll {
                 num: 2,
                 die: 20,
+                bonus: 0,
                 exclude: Exclude::High,
             })],
             "chaos" | "chaos_bolt" => vec![
                 Some(Roll {
                     num: 2,
                     die: 8,
+                    bonus: 0,
                     exclude: Exclude::None,
                 }),
                 Some(Roll {
                     num: 1,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::None,
                 }),
             ],
@@ -150,36 +158,43 @@ where
                 Some(Roll {
                     num: 4,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::Low,
                 }),
                 Some(Roll {
                     num: 4,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::Low,
                 }),
                 Some(Roll {
                     num: 4,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::Low,
                 }),
                 Some(Roll {
                     num: 4,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::Low,
                 }),
                 Some(Roll {
                     num: 4,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::Low,
                 }),
                 Some(Roll {
                     num: 4,
                     die: 6,
+                    bonus: 0,
                     exclude: Exclude::Low,
                 }),
             ],
             arg => vec![parse_arg(arg)],
-        }).collect()
+        })
+        .collect()
     }
 }
 
@@ -188,10 +203,12 @@ fn main() {
     match rolls {
         Some(rolls) => match rolls.len() {
             0 => println!("[Error] No dice specified"),
-            _ => for roll in rolls {
-                let mut rng = thread_rng();
-                roll.roll(&mut rng);
-            },
+            _ => {
+                for roll in rolls {
+                    let mut rng = thread_rng();
+                    roll.roll(&mut rng);
+                }
+            }
         },
         None => println!("[Error] Failed to parse input"),
     }
