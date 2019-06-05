@@ -16,17 +16,36 @@ struct Roll {
     exclude: Exclude,
 }
 
+type Error = &'static str;
+type Result<T> = std::result::Result<T, Error>;
+
 /// Generates a random number in the range specified by the die.
 fn roll_die(die: u32, mut rng: impl Rng) -> u32 {
-    rng.gen_range(1, die + 1)
+    match die {
+        0 => 0,
+        n => rng.gen_range(1, n + 1),
+    }
 }
 
 impl Roll {
     /// Simulates the `Roll`.
-    fn roll(&self, mut rng: impl Rng) {
-        print!("[{}d{}", self.num, self.die);
+    fn roll(&self, mut rng: impl Rng) -> Option<i32> {
+        print!("[");
+        let printed_die = if self.die != 0 {
+            if self.num != 1 {
+                print!("{}", self.num);
+            }
+            print!("d{}", self.die);
+            true
+        } else {
+            false
+        };
         if self.bonus != 0 {
-            print!("{:+}", self.bonus);
+            if printed_die {
+                print!("{:+}", self.bonus);
+            } else {
+                print!("{}", self.bonus);
+            }
         }
         match self.exclude {
             Exclude::Low => print!(" - low"),
@@ -36,8 +55,9 @@ impl Roll {
         print!("] ");
         match self.num {
             1 => {
-                let roll = rng.gen_range(1, self.die + 1) as i32 + self.bonus;
+                let roll = roll_die(self.die, rng) as i32 + self.bonus;
                 println!("{}", roll);
+                Some(roll)
             }
             n if n > 1 => {
                 let mut rolls = vec![];
@@ -77,8 +97,12 @@ impl Roll {
                 let total = rolls.iter().sum::<u32>() as i32 + self.bonus;
                 let exclude = exclude as i32;
                 println!("final = {}", total - exclude);
+                Some(total - exclude)
             }
-            _ => println!("no dice rolled"),
+            _ => {
+                println!("no dice rolled");
+                None
+            }
         }
     }
 }
@@ -87,50 +111,59 @@ impl Roll {
 /// form of either <number>d<die> or d<die>. In the latter case, the number of
 /// dice is inferred to be 1. If the argument cannot be parsed, `None` is
 /// returned instead.
-fn parse_arg(arg: &str) -> Result<Roll, &'static str> {
+fn parse_arg(arg: &str) -> Result<Roll> {
     const ERR_NO_DIE: &'static str = "invalid roll format: no die specified";
     const ERR_MOD_FMT: &'static str = "invalid roll format: modifier must be an integer";
     const ERR_DIE_FMT: &'static str = "invalid roll format: die must be an integer";
 
-    let idx = arg.find('d').ok_or_else(|| ERR_NO_DIE)?;
-    let (num, die) = arg.split_at(idx);
-    let num: u32 = num.parse().unwrap_or_else(|_| 1);
-    let die = die.trim_start_matches("d");
+    if let Some(idx) = arg.find('d') {
+        let (num, die) = arg.split_at(idx);
+        let num: u32 = num.parse().unwrap_or_else(|_| 1);
+        let die = die.trim_start_matches("d");
 
-    // Check if we have a flat bonus
-    let (die, bonus) = if let Some(bonus_idx) = die.find('+') {
-        let (die, bonus) = die.split_at(bonus_idx);
-        let bonus: i32 = bonus.parse().map_err(|_| ERR_MOD_FMT)?;
-        let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
-        (die, bonus)
-    } else if let Some(bonus_idx) = die.find('-') {
-        let (die, bonus) = die.split_at(bonus_idx);
-        let bonus: i32 = bonus.parse().map_err(|_| ERR_MOD_FMT)?;
-        let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
-        (die, bonus)
+        // Check if we have a flat bonus
+        let (die, bonus) = if let Some(bonus_idx) = die.find('+') {
+            let (die, bonus) = die.split_at(bonus_idx);
+            let bonus: i32 = bonus.parse().map_err(|_| ERR_MOD_FMT)?;
+            let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
+            (die, bonus)
+        } else if let Some(bonus_idx) = die.find('-') {
+            let (die, bonus) = die.split_at(bonus_idx);
+            let bonus: i32 = bonus.parse().map_err(|_| ERR_MOD_FMT)?;
+            let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
+            (die, bonus)
+        } else {
+            let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
+            (die, 0)
+        };
+
+        Ok(Roll {
+            num,
+            die,
+            bonus,
+            exclude: Exclude::None,
+        })
     } else {
-        let die: u32 = die.parse().map_err(|_| ERR_DIE_FMT)?;
-        (die, 0)
-    };
-
-    Ok(Roll {
-        num,
-        die,
-        bonus,
-        exclude: Exclude::None,
-    })
+        let flat_bonus: i32 = arg.parse().map_err(|_| ERR_NO_DIE)?;
+        Ok(Roll {
+            num: 1,
+            die: 0,
+            bonus: flat_bonus,
+            exclude: Exclude::None,
+        })
+    }
 }
 
 trait ParseArgs {
     /// Attempts to parse the arguments into an `impl Iterator<Item=Roll`.
-    fn parse_args(self) -> Result<Vec<Roll>, &'static str>;
+    fn parse_args(self) -> Result<Vec<Roll>>;
 }
 
 impl<T> ParseArgs for T
 where
     T: Iterator<Item = String>,
 {
-    fn parse_args(self) -> Result<Vec<Roll>, &'static str> {
+    fn parse_args(self) -> Result<Vec<Roll>> {
         self.flat_map(|arg| match arg.as_str() {
             "adv" | "advantage" => vec![Ok(Roll {
                 num: 2,
@@ -196,6 +229,68 @@ where
                     exclude: Exclude::Low,
                 }),
             ],
+            "tiny-objects" | "tiny" | "animate-objects" => vec![
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+                Ok(Roll {
+                    num: 1,
+                    die: 20,
+                    bonus: 8,
+                    exclude: Exclude::None,
+                }),
+            ],
             arg => vec![parse_arg(arg)],
         })
         .collect()
@@ -206,13 +301,24 @@ fn main() {
     let name = env::args().next().unwrap();
     let rolls = env::args().skip(1).parse_args();
     match rolls {
-        Ok(rolls) => match rolls.len() {
-            0 => println!("{}: no dice specified", name),
-            _ => {
+        Ok(rolls) => match &rolls[..] {
+            [] => println!("{}: no dice specified", name),
+            [roll] => {
+                let mut rng = thread_rng();
+                roll.roll(&mut rng);
+            }
+            rolls => {
+                let mut total = 0;
+                let mut rng = thread_rng();
                 for roll in rolls {
-                    let mut rng = thread_rng();
-                    roll.roll(&mut rng);
+                    match roll.roll(&mut rng) {
+                        Some(num) => {
+                            total += num;
+                        }
+                        None => eprintln!("error has occurred"),
+                    }
                 }
+                println!("Total roll: {}", total);
             }
         },
         Err(why) => println!("{}: {}", name, why),
